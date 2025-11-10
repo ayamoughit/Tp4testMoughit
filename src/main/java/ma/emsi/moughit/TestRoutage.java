@@ -14,6 +14,9 @@ import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.embedding.onnx.allminilml6v2.AllMiniLmL6V2EmbeddingModel;
 import dev.langchain4j.model.googleai.GoogleAiGeminiChatModel;
 import dev.langchain4j.model.input.PromptTemplate;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.model.output.Response;
 import dev.langchain4j.rag.DefaultRetrievalAugmentor;
 import dev.langchain4j.rag.RetrievalAugmentor;
 import dev.langchain4j.rag.content.retriever.ContentRetriever;
@@ -96,11 +99,12 @@ public class TestRoutage {
                 String userQuery = query.text();
                 String prompt = promptTemplate.apply(Collections.singletonMap("it", userQuery)).text();
 
-                String response = chatModel.generate(prompt);
+                Response<AiMessage> response = chatModel.generate(UserMessage.from(prompt));
+                String responseText = response.content().text();
 
-                System.out.println("Routing decision for query '" + userQuery + "': " + response);
+                System.out.println("Routing decision for query '" + userQuery + "': " + responseText);
 
-                if (response.trim().equalsIgnoreCase("no")) {
+                if (responseText.trim().equalsIgnoreCase("no")) {
                     return Collections.emptyList();
                 } else {
                     return Collections.singletonList(ragRetriever);
