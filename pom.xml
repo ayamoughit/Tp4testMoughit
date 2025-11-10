@@ -5,14 +5,14 @@
 <modelVersion>4.0.0</modelVersion>
 
 <groupId>ma.emsi.moughit</groupId>
-<artifactId>tp4TestKharraz</artifactId>
+<artifactId>tp4TestMoughit</artifactId>
 <version>1.0-SNAPSHOT</version>
 
 <properties>
     <maven.compiler.source>21</maven.compiler.source>
     <maven.compiler.target>21</maven.compiler.target>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <langchain4j.version>0.30.0</langchain4j.version>
+    <langchain4j.version>1.5.0</langchain4j.version>
 </properties>
 
 <dependencies>
