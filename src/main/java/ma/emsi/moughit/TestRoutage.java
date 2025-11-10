@@ -95,6 +95,7 @@ public class TestRoutage {
             public Collection<ContentRetriever> route(Query query) {
                 String userQuery = query.text();
                 String prompt = promptTemplate.apply(Collections.singletonMap("it", userQuery)).text();
+
                 String response = chatModel.generate(prompt);
 
                 System.out.println("Routing decision for query '" + userQuery + "': " + response);
