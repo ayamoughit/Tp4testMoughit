@@ -8,21 +8,21 @@ import dev.langchain4j.data.document.parser.apache.tika.ApacheTikaDocumentParser
 import dev.langchain4j.data.document.splitter.DocumentSplitters;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
-import dev.langchain4j.memory.ChatMemory;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.model.embedding.onnx.allminilml6v2.AllMiniLmL6V2EmbeddingModel;
 import dev.langchain4j.model.googleai.GoogleAiGeminiChatModel;
+import dev.langchain4j.model.input.PromptTemplate;
 import dev.langchain4j.rag.DefaultRetrievalAugmentor;
 import dev.langchain4j.rag.RetrievalAugmentor;
 import dev.langchain4j.rag.content.retriever.ContentRetriever;
 import dev.langchain4j.rag.content.retriever.EmbeddingStoreContentRetriever;
-import dev.langchain4j.rag.query.router.LanguageModelQueryRouter;
+import dev.langchain4j.rag.query.Query;
 import dev.langchain4j.rag.query.router.QueryRouter;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import dev.langchain4j.store.embedding.inmemory.InMemoryEmbeddingStore;
-import dev.langchain4j.model.embedding.onnx.allminilml6v2.AllMiniLmL6V2EmbeddingModel;
 
 import java.net.URISyntaxException;
 import java.net.URL;
@@ -32,7 +32,6 @@ import java.util.*;
 import java.util.logging.ConsoleHandler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import java.util.Scanner;
 
 public class TestRoutage {
 
@@ -55,54 +54,64 @@ public class TestRoutage {
                 .apiKey(llmKey)
                 .temperature(0.3)
                 .logRequestsAndResponses(true)
-                .modelName("gemini-2.5-flash")
+                .modelName("gemini-1.5-flash")
                 .build();
 
-        // --- Document Ingestion ---
+        // --- Document Ingestion for AI topics ---
         DocumentParser parser = new ApacheTikaDocumentParser();
         Document docAI = FileSystemDocumentLoader.loadDocument(toPath("rag.pdf"), parser);
-        Document docNonAI = FileSystemDocumentLoader.loadDocument(toPath("Chapitre-06__Pig-Latin.pdf"), parser);
 
         DocumentSplitter splitter = DocumentSplitters.recursive(300, 0);
         List<TextSegment> segmentsAI = splitter.split(docAI);
-        List<TextSegment> segmentsNonAI = splitter.split(docNonAI);
 
         EmbeddingModel embeddingModel = new AllMiniLmL6V2EmbeddingModel();
-
         List<Embedding> embeddingsAI = embeddingModel.embedAll(segmentsAI).content();
-        List<Embedding> embeddingsNonAI = embeddingModel.embedAll(segmentsNonAI).content();
 
         EmbeddingStore<TextSegment> storeAI = new InMemoryEmbeddingStore<>();
         storeAI.addAll(embeddingsAI, segmentsAI);
 
-        EmbeddingStore<TextSegment> storeNonAI = new InMemoryEmbeddingStore<>();
-        storeNonAI.addAll(embeddingsNonAI, segmentsNonAI);
-
-        // --- Content Retrievers ---
+        // --- Content Retriever for AI topics ---
         ContentRetriever retrieverAI = EmbeddingStoreContentRetriever.builder()
                 .embeddingStore(storeAI)
                 .embeddingModel(embeddingModel)
-                .maxResults(3)
-                .minScore(0.5)
+                .maxResults(2)
+                .minScore(0.6)
                 .build();
 
-        ContentRetriever retrieverNonAI = EmbeddingStoreContentRetriever.builder()
-                .embeddingStore(storeNonAI)
-                .embeddingModel(embeddingModel)
-                .maxResults(3)
-                .minScore(0.5)
-                .build();
+        // --- Custom Query Router ---
+        class RagOrNotQueryRouter implements QueryRouter {
+            private final ChatModel chatModel;
+            private final ContentRetriever ragRetriever;
+            private final PromptTemplate promptTemplate = PromptTemplate.from(
+                    "Is the query '{{it}}' about AI? Answer only with 'yes', 'no', or 'maybe'."
+            );
 
-        // --- Query Router ---
-        Map<ContentRetriever, String> routerMap = new HashMap<>();
-        routerMap.put(retrieverAI, "This document contains information about Artificial Intelligence, RAG, and related concepts.");
-        routerMap.put(retrieverNonAI, "This document contains information about general problems, heuristics, and non-AI topics.");
+            public RagOrNotQueryRouter(ChatModel chatModel, ContentRetriever ragRetriever) {
+                this.chatModel = chatModel;
+                this.ragRetriever = ragRetriever;
+            }
 
-        QueryRouter queryRouter = new LanguageModelQueryRouter(chatModel, routerMap);
+            @Override
+            public Collection<ContentRetriever> route(Query query) {
+                String userQuery = query.text();
+                String prompt = promptTemplate.apply(Collections.singletonMap("it", userQuery)).text();
+                String response = chatModel.generate(prompt);
+
+                System.out.println("Routing decision for query '" + userQuery + "': " + response);
+
+                if (response.trim().equalsIgnoreCase("no")) {
+                    return Collections.emptyList();
+                } else {
+                    return Collections.singletonList(ragRetriever);
+                }
+            }
+        }
+
+        QueryRouter customQueryRouter = new RagOrNotQueryRouter(chatModel, retrieverAI);
 
         // --- Retrieval Augmentor ---
         RetrievalAugmentor retrievalAugmentor = DefaultRetrievalAugmentor.builder()
-                .queryRouter(queryRouter)
+                .queryRouter(customQueryRouter)
                 .build();
 
         // --- Assistant ---
@@ -114,22 +123,25 @@ public class TestRoutage {
 
         // --- Chat loop ---
         System.out.println("Assistant is ready. Ask your questions (type 'exit' to quit).");
-        Scanner scanner = new Scanner(System.in);
-        while (true) {
-            System.out.print("User: ");
-            String question = scanner.nextLine();
-            if ("exit".equalsIgnoreCase(question)) break;
-
-            String response = assistant.chat(question);
-            System.out.println("Assistant: " + response);
+        try (Scanner scanner = new Scanner(System.in)) {
+            while (true) {
+                System.out.print("User: ");
+                String question = scanner.nextLine();
+                if ("exit".equalsIgnoreCase(question)) {
+                    break;
+                }
+                String response = assistant.chat(question);
+                System.out.println("Assistant: " + response);
+            }
         }
-        scanner.close();
     }
 
     private static Path toPath(String resourceName) {
         try {
             URL resourceUrl = TestRoutage.class.getClassLoader().getResource(resourceName);
-            if (resourceUrl == null) throw new RuntimeException("Resource not found: " + resourceName);
+            if (resourceUrl == null) {
+                throw new RuntimeException("Resource not found: " + resourceName);
+            }
             return Paths.get(resourceUrl.toURI());
         } catch (URISyntaxException e) {
             throw new RuntimeException(e);
